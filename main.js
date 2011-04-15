@@ -15,10 +15,18 @@ var b2Vec2 = Box2D.Common.Math.b2Vec2
 	,	b2PolygonShape = Box2D.Collision.Shapes.b2PolygonShape
 	,	b2CircleShape = Box2D.Collision.Shapes.b2CircleShape
 	,	b2DebugDraw = Box2D.Dynamics.b2DebugDraw
-	, b2AABB = Box2D.Collision.b2AABB;
+	, b2AABB = Box2D.Collision.b2AABB
+	, b2MouseJointDef = Box2D.Dynamics.Joints.b2MouseJointDef;
+
+peggle.mouseX = undefined;
+peggle.mouseY = undefined;
+peggle.mouseJoint = null;
+peggle.mousePVec = undefined;
+peggle.isMouseDown = false;
 
 init = function() {
 	peggle.nextCrateIn = 0;
+	peggle.canvasPosition = peggle.getElementPosition(document.getElementById("canvas"));
 	
 	// 1. Create our world
 	peggle.setupWorld();
@@ -30,6 +38,48 @@ init = function() {
 	
 	// peggle.update();
 	window.setInterval(peggle.update, 1000/60);
+	
+	document.addEventListener("mousedown", function(e){
+		peggle.isMouseDown = true;
+		peggle.handleMouseMove(e);
+		document.addEventListener("mousemove", peggle.handleMouseMove, true);
+	}, true);
+	
+	document.addEventListener("mouseup", function(){
+		document.removeEventListener("mousemove", peggle.handleMouseMove, true);
+		peggle.isMouseDown = false;
+		peggle.mouseX = undefined;
+		peggle.mouseY = undefined;
+	}, true);
+	
+};
+
+peggle.handleMouseMove = function(e) {
+	peggle.mouseX = (e.clientX - peggle.canvasPosition.x) / RATIO;
+	peggle.mouseY = (e.clientY - peggle.canvasPosition.y) / RATIO;
+};
+
+peggle.getBodyAtMouse = function() {
+	peggle.mousePVec = new b2Vec2(peggle.mouseX, peggle.mouseY);
+	var aabb = new b2AABB();
+	aabb.lowerBound.Set(peggle.mouseX - 0.001, peggle.mouseY - 0.001);
+	aabb.upperBound.Set(peggle.mouseX + 0.001, peggle.mouseY + 0.001);
+	
+	// console.log("getBodyAtMouse");
+	peggle.selectedBody = null;
+	peggle.world.QueryAABB(peggle.getBodyCB, aabb);
+	return peggle.selectedBody;
+};
+
+peggle.getBodyCB = function(fixture) {
+	console.log(fixture);
+	if(fixture.GetBody().GetType() != b2Body.b2_staticBody) {
+		if(fixture.GetShape().TestPoint(fixture.GetBody().GetTransform(), peggle.mousePVec)) {
+			peggle.selectedBody = fixture.GetBody();
+			return false;
+		};
+	};
+	return true;
 };
 
 peggle.setupDebugDraw = function() {
@@ -43,15 +93,39 @@ peggle.setupDebugDraw = function() {
 };
 
 peggle.update = function() {
-	peggle.world.Step(1/60, 10, 10);
-	peggle.world.DrawDebugData();
-	peggle.world.ClearForces();
+	// console.log(peggle.isMouseDown);
+	if(peggle.isMouseDown && (!peggle.mouseJoint)) {
+		var body = peggle.getBodyAtMouse();
+		if(body) {
+			var md = new b2MouseJointDef();
+			md.bodyA = peggle.world.GetGroundBody();
+			md.bodyB = body;
+			md.target.Set(peggle.mouseX, peggle.mouseY);
+			md.collideConnected = true;
+			md.maxForce = 300.0 * body.GetMass();
+			peggle.mouseJoint = peggle.world.CreateJoint(md);
+			body.SetAwake(true);
+		};
+	};
 	
+	if(peggle.mouseJoint) {
+		if(peggle.isMouseDown) {
+			peggle.mouseJoint.SetTarget(new b2Vec2(peggle.mouseX, peggle.mouseY));
+		} else {
+			peggle.world.DestroyJoint(peggle.mouseJoint);
+			peggle.mouseJoint = null;
+		};
+	};
+		
 	if(peggle.world.m_bodyCount < 80 && peggle.nextCrateIn-- <= 0) {
 		peggle.addRandomCrate();
 		
 		peggle.nextCrateIn = 5;
 	};
+	
+	peggle.world.Step(1/60, 10, 10);
+	peggle.world.DrawDebugData();
+	peggle.world.ClearForces();
 	
 };
 
@@ -83,15 +157,10 @@ peggle.randomInt = function(lowVal, hiVal) {
 };
 
 peggle.setupWorld = function() {
-	// 1. ste up size of universe
-	// var universeSize = new b2AABB();
-	// universeSize.lowerBound.Set(-3000/RATIO, -3000/RATIO);
-	// universeSize.upperBound.Set(3000/RATIO, 3000/RATIO);
-	
-	// 2. define hte gravity
+	// 1. define hte gravity
 	var gravity = new b2Vec2(0, 10);
 	
-	// 3. ignore sleeping objects?
+	// 2. ignore sleeping objects?
 	var ignoreSleeping = true;
 	
 	peggle.world = new b2World(gravity, ignoreSleeping);
@@ -117,3 +186,22 @@ peggle.createWallsAndFloor = function() {
 	// need to set mass in the world
 };
 
+peggle.getElementPosition = function(element) {
+   var elem=element, tagname="", x=0, y=0;
+  
+   while((typeof(elem) == "object") && (typeof(elem.tagName) != "undefined")) {
+      y += elem.offsetTop;
+      x += elem.offsetLeft;
+      tagname = elem.tagName.toUpperCase();
+
+      if(tagname == "BODY")
+         elem=0;
+
+      if(typeof(elem) == "object") {
+         if(typeof(elem.offsetParent) == "object")
+            elem = elem.offsetParent;
+      }
+   }
+
+   return {x: x, y: y};
+}
